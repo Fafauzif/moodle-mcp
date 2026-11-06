@@ -1,0 +1,12 @@
+{
+  "name": "moodle-mcp",
+  "version": "1.0.0",
+  "description": "Zero-dependency MCP server connecting AI assistants to a Moodle LMS via the official Web Services REST API.",
+  "license": "MIT",
+  "type": "module",
+  "main": "mcp-server/moodlemcp.mjs",
+  "scripts": {
+    "start": "node mcp-server/moodlemcp.mjs",
+    "test": "node --test tests/*.test.js"
+  }
+}
