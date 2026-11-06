@@ -51,15 +51,28 @@ async function fetchJson(url, { method = "GET", body, timeoutMs = 20000 } = {}) 
   }
 }
 
+function appendParams(url, prefix, value) {
+  if (value === undefined || value === null) return;
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => appendParams(url, `${prefix}[${index}]`, item));
+  } else if (typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      appendParams(url, `${prefix}[${key}]`, item);
+    }
+  } else if (typeof value === "boolean") {
+    url.searchParams.set(prefix, value ? "1" : "0");
+  } else {
+    url.searchParams.set(prefix, String(value));
+  }
+}
+
 export function buildRestUrl(siteUrl, token, wsfunction, params = {}) {
   const url = new URL(`${siteUrl}/webservice/rest/server.php`);
   url.searchParams.set("wstoken", token);
   url.searchParams.set("wsfunction", wsfunction);
   url.searchParams.set("moodlewsrestformat", "json");
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== null) {
-      url.searchParams.set(key, String(value));
-    }
+    appendParams(url, key, value);
   }
   return url;
 }
@@ -173,9 +186,17 @@ async function submitForGrading(config, assignid) {
   return callMoodle(config, "mod_assign_submit_for_grading", { assignid, nomatch: false });
 }
 
+function toUnixSeconds(value, fallback) {
+  const parsed = value ? Date.parse(value) : fallback;
+  if (Number.isNaN(parsed)) {
+    throw new Error(`Invalid date: ${value}`);
+  }
+  return Math.floor(parsed / 1000);
+}
+
 async function getDeadlines(config, args) {
-  const from = Math.floor(Date.parse(args.from || Date.now()) / 1000);
-  const to = Math.floor(Date.parse(args.to || Date.now() + 60 * 864e5) / 1000);
+  const from = toUnixSeconds(args.from, Date.now());
+  const to = toUnixSeconds(args.to, Date.now() + 60 * 864e5);
   const courses = await callMoodle(config, "core_enrol_get_users_courses", {
     userid: await getUserId(config),
   });
@@ -215,7 +236,7 @@ async function getDeadlines(config, args) {
   }
 
   const eventsPayload = await callMoodle(config, "core_calendar_get_calendar_events", {
-    events: {},
+    events: { courseids: courseids.length ? courseids : [0] },
     options: { timestart: from, timeend: to, ignorehidden: false },
   });
   const events = (eventsPayload.events || []).map((event) => ({
@@ -415,14 +436,20 @@ async function dispatch(config, name, args) {
       return callMoodle(config, "mod_assign_get_assignments", params);
     }
     case "get_upcoming_events": {
+      let courseids = args.courseids || [];
+      if (!courseids.length) {
+        const courses = await callMoodle(config, "core_enrol_get_users_courses", {
+          userid: await getUserId(config),
+        });
+        courseids = (courses || []).map((course) => course.id);
+      }
       const payload = await callMoodle(config, "core_calendar_get_calendar_events", {
-        events: {},
+        events: { courseids: courseids.length ? courseids : [0] },
         options: {
-          timestart: Math.floor(Date.parse(args.from || Date.now()) / 1000),
-          timeend: Math.floor(Date.parse(args.to || Date.now() + 60 * 864e5) / 1000),
+          timestart: toUnixSeconds(args.from, Date.now()),
+          timeend: toUnixSeconds(args.to, Date.now() + 60 * 864e5),
           ignorehidden: false,
         },
-        ...args,
       });
       return payload;
     }
